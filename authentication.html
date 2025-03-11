@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Study Group Authentication</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .page { display: none; }
+    .visible { display: block; }
+    input { display: block; margin: 10px 0; padding: 8px; width: 300px; }
+    button { padding: 8px 16px; margin: 10px 0; }
+  </style>
+  <!-- Papa Parse CDN for CSV parsing -->
+ <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+
+</head>
+<body>
+  <!-- Home Page -->
+  <div id="home-page" class="page visible">
+    <h2>Welcome to the Authentication App</h2>
+    <p>Please choose an option:</p>
+    <button id="btn-login">Login</button>
+    <button id="btn-signup">Sign Up</button>
+  </div>
+
+  <!-- Login Page -->
+  <div id="login-page" class="page">
+    <h2>Login</h2>
+    <input type="email" id="login-email" placeholder="Email Address" required>
+    <input type="password" id="login-pgid" placeholder="Password (PGID)" required>
+    <button id="btn-do-login">Login</button>
+    <p id="login-message"></p>
+    <button id="btn-back-home-from-login">Back to Home</button>
+  </div>
+
+  <!-- Sign Up Page -->
+  <div id="signup-page" class="page">
+    <h2>Sign Up</h2>
+    <input type="text" id="signup-name" placeholder="Full Name" required>
+    <input type="email" id="signup-email" placeholder="Email Address" required>
+    <input type="password" id="signup-pgid" placeholder="Password (PGID)" required>
+    <input type="text" id="signup-group" placeholder="Study Group ID" required>
+    <button id="btn-do-signup">Sign Up</button>
+    <p id="signup-message"></p>
+    <button id="btn-back-home-from-signup">Back to Home</button>
+  </div>
+
+  <!-- Profile Page -->
+  <div id="profile-page" class="page">
+    <h2>Profile</h2>
+    <p id="profile-message"></p>
+    <button id="btn-logout">Logout</button>
+  </div>
+
+  <script>
+    // Configuration for GitHub API and CSV file
+    const GITHUB_TOKEN = "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"; // Replace with your token
+    const OWNER = "pramitgupta";       // GitHub username/organization
+    const REPO = "greenleaf1"; // Repository name
+    const FILE_PATH = "Class_List_MLBM.csv"; // CSV file path in the repository
+    const BRANCH = "main";
+
+    // Base URL for GitHub API calls
+    const API_URL = `https://api.github.com/repos/${OWNER}/${REPO}/contents/${FILE_PATH}?ref=${BRANCH}`;
+    // Raw URL for reading the CSV file
+    const RAW_URL = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/${FILE_PATH}`;
+
+    // Helper: Show one page and hide others
+    function showPage(pageId) {
+      const pages = document.querySelectorAll(".page");
+      pages.forEach(p => p.classList.remove("visible"));
+      document.getElementById(pageId).classList.add("visible");
+    }
+
+    // Fetch the CSV file from GitHub (read-only)
+    async function fetchCSV() {
+      try {
+        const response = await fetch(RAW_URL);
+        if (!response.ok) throw new Error("Could not fetch CSV");
+        const csvText = await response.text();
+        return csvText;
+      } catch (error) {
+        console.error("Error fetching CSV:", error);
+        return null;
+      }
+    }
+
+    // Update CSV file on GitHub using the API
+    async function updateCSV(newCSVContent, sha) {
+      try {
+        const url = `https://api.github.com/repos/${OWNER}/${REPO}/contents/${FILE_PATH}`;
+        const body = {
+          message: "Update CSV via web app",
+          content: btoa(newCSVContent), // base64 encode
+          sha: sha,
+          branch: BRANCH
+        };
+        const response = await fetch(url, {
+          method: "PUT",
+          headers: {
+            "Authorization": `token ${GITHUB_TOKEN}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(body)
+        });
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || "Failed to update CSV");
+        }
+        return await response.json();
+      } catch (error) {
+        console.error("Error updating CSV:", error);
+        throw error;
+      }
+    }
+
+    // Get the file SHA (needed for updating)
+    async function getFileSHA() {
+      try {
+        const response = await fetch(API_URL, {
+          headers: { "Authorization": `token ${GITHUB_TOKEN}` }
+        });
+        if (!response.ok) throw new Error("Could not fetch file info");
+        const data = await response.json();
+        return data.sha;
+      } catch (error) {
+        console.error("Error getting file SHA:", error);
+        return null;
+      }
+    }
+
+    // Login function: Check if provided email and PGID exist in the CSV
+    async function doLogin() {
+      const email = document.getElementById("login-email").value.trim().toLowerCase();
+      const pgid = document.getElementById("login-pgid").value.trim();
+      const loginMessage = document.getElementById("login-message");
+      loginMessage.textContent = "";
+      
+      if (!email || !pgid) {
+        loginMessage.textContent = "Please fill in all fields.";
+        return;
+      }
+      
+      const csvText = await fetchCSV();
+      if (!csvText) {
+        loginMessage.textContent = "Error loading user data.";
+        return;
+      }
+      
+      const data = Papa.parse(csvText, { header: true }).data;
+      // Find user (case-insensitive match for email)
+      const user = data.find(u => u["Email IDs"] && u["Email IDs"].trim().toLowerCase() === email && u["PGIDs"] === pgid);
+      
+      if (user) {
+        // Display welcome message with full name and study group
+        document.getElementById("profile-message").innerHTML =
+          `<strong>Welcome ${user["Name"]}!</strong><br>Your Study Group: ${user["Group IDs"]}`;
+        showPage("profile-page");
+      } else {
+        loginMessage.textContent = "Invalid credentials.";
+      }
+    }
+
+    // Sign up function: Add a new record to the CSV file
+    async function doSignup() {
+      const name = document.getElementById("signup-name").value.trim();
+      const email = document.getElementById("signup-email").value.trim().toLowerCase();
+      const pgid = document.getElementById("signup-pgid").value.trim();
+      const group = document.getElementById("signup-group").value.trim();
+      const signupMessage = document.getElementById("signup-message");
+      signupMessage.textContent = "";
+      
+      if (!name || !email || !pgid || !group) {
+        signupMessage.textContent = "Please fill in all fields.";
+        return;
+      }
+      
+      // Fetch current CSV and parse it
+      const csvText = await fetchCSV();
+      if (!csvText) {
+        signupMessage.textContent = "Error loading user data.";
+        return;
+      }
+      
+      const results = Papa.parse(csvText, { header: true });
+      let data = results.data;
+      
+      // Check for duplicate email (case-insensitive)
+      const existing = data.find(u => u["Email IDs"] && u["Email IDs"].trim().toLowerCase() === email);
+      if (existing) {
+        signupMessage.textContent = "Email already registered.";
+        return;
+      }
+      
+      // Add new user object
+      const newUser = {
+        "Name": name,
+        "Email IDs": email,
+        "PGIDs": pgid,
+        "Group IDs": group
+      };
+      data.push(newUser);
+      
+      // Convert back to CSV format
+      const newCSV = Papa.unparse(data);
+      const sha = await getFileSHA();
+      if (!sha) {
+        signupMessage.textContent = "Error retrieving file info for update.";
+        return;
+      }
+      
+      try {
+        await updateCSV(newCSV, sha);
+        signupMessage.textContent = "Signup successful! Please go to Home and Login.";
+      } catch (error) {
+        signupMessage.textContent = "Error during signup: " + error.message;
+      }
+    }
+
+    // Event listeners for navigation and actions
+    document.getElementById("btn-login").addEventListener("click", () => {
+      showPage("login-page");
+    });
+    document.getElementById("btn-signup").addEventListener("click", () => {
+      showPage("signup-page");
+    });
+    document.getElementById("btn-back-home-from-login").addEventListener("click", () => {
+      showPage("home-page");
+    });
+    document.getElementById("btn-back-home-from-signup").addEventListener("click", () => {
+      showPage("home-page");
+    });
+    document.getElementById("btn-do-login").addEventListener("click", doLogin);
+    document.getElementById("btn-do-signup").addEventListener("click", doSignup);
+    document.getElementById("btn-logout").addEventListener("click", () => {
+      showPage("home-page");
+    });
+  </script>
+</body>
+</html>
